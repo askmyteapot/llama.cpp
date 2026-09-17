@@ -753,8 +753,29 @@ static __device__ __forceinline__ int ggml_cuda_dp4a(const int a, const int b, i
 
 #else // defined(GGML_USE_HIP)
 
-#if __CUDA_ARCH__ >= GGML_CUDA_CC_DP4A || defined(GGML_USE_MUSA)
+#if (__CUDA_ARCH__ >= GGML_CUDA_CC_DP4A || defined(GGML_USE_MUSA)) && \
+    !defined(GGML_CUDA_DISABLE_DP4A)
     return __dp4a(a, b, c);
+#elif defined(GGML_CUDA_DISABLE_DP4A) && __CUDA_ARCH__ == GGML_CUDA_CC_VOLTA
+    // Mixed-rig carve-out (llama.cpp#24616, LarsKort V100 + CMP50): V100 sm70 is
+    // unthrottled, keep native DP4A even when the DP2A fallback is requested.
+    return __dp4a(a, b, c);
+#elif defined(GGML_CUDA_DISABLE_DP4A) && __CUDA_ARCH__ >= GGML_CUDA_CC_DP4A
+    // Some NVIDIA CMP cards expose DP4A but execute it at a heavily reduced
+    // rate. Use two DP2A instructions instead when explicitly requested.
+    // DP2A is available since sm61, same as DP4A. Opt-in only: not expected
+    // to help normal NVIDIA GPUs (llama.cpp#24616 / PR#25834).
+    int a_lo;
+    int a_hi;
+    asm("prmt.b32 %0, %1, 0, 0x9180;" : "=r"(a_lo) : "r"(a));
+    asm("prmt.b32 %0, %1, 0, 0xB3A2;" : "=r"(a_hi) : "r"(a));
+    asm("dp2a.lo.s32.s32 %0, %1, %2, %0;"
+        : "+r"(c)
+        : "r"(a_lo), "r"(b));
+    asm("dp2a.hi.s32.s32 %0, %1, %2, %0;"
+        : "+r"(c)
+        : "r"(a_hi), "r"(b));
+    return c;
 #else // __CUDA_ARCH__ >= GGML_CUDA_CC_DP4A || defined(GGML_USE_MUSA)
     const int8_t * a8 = (const int8_t *) &a;
     const int8_t * b8 = (const int8_t *) &b;

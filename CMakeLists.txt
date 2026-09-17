@@ -37,6 +37,7 @@ endif()
 
 # 3rd party libs
 option(LLAMA_CUBLAS                          "llama: use CUDA"                                ON)
+option(LLAMA_CUDA_DISABLE_DP4A               "llama: use DP2A instead of DP4A for CUDA kernels (helps throttled CMP cards, hurts normal GPUs)" OFF)
 set(LLAMA_CUDA_PEER_MAX_BATCH_SIZE "128" CACHE STRING
                                              "llama: max. batch size for using peer access")
 
@@ -105,6 +106,10 @@ if (LLAMA_CUBLAS)
         add_compile_definitions(SD_USE_CUDA)
 
         add_compile_definitions(GGML_CUDA_PEER_MAX_BATCH_SIZE=${LLAMA_CUDA_PEER_MAX_BATCH_SIZE})
+
+        if (LLAMA_CUDA_DISABLE_DP4A)
+            add_compile_definitions(GGML_CUDA_DISABLE_DP4A)
+        endif()
 
         # only build minimal quants required for fattn quant kv
         list(APPEND GGML_SOURCES_CUDA
